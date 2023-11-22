@@ -18,8 +18,7 @@
       if ('error' in data)
         return $('.data').text('no files');
       for (const file of data) {
-
-        let td = '<td><a href="/api/file'+file.path+'">'+file.path+'</a> (size: '+file.size+')</td>'
+        let td = '<td><a href="/api/file/'+file.path+'">'+file.path+'</a> (size: '+file.size+')</td>'
         let tr = '<tr>' + td + '</tr>'
         $('.data').append(tr)
       }

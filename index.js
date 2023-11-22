@@ -1,18 +1,21 @@
-const ipfsClient = require('ipfs-http-client');
+/* const ipfsClient = require('ipfs-http-client');
 const { globSource } = ipfsClient;
 const ipfsEndPoint = 'http://localhost:5001'
-const ipfs = ipfsClient(ipfsEndPoint);
+const ipfs = ipfsClient(ipfsEndPoint); */
 
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const util = require('util');
+const readdir = util.promisify(fs.readdir);
+const statAsync = util.promisify(fs.stat);
 
 ////////////////////////////////
 //////////// IPFS //////////////
 ////////////////////////////////
 
 generateKeys()
-// _testing()
+_testing()
 
 
 async function uploadFileEncrypted(file, ipfspath) {
@@ -29,11 +32,12 @@ async function uploadFileEncrypted(file, ipfspath) {
       Buffer.from(ebuff, 'utf8')
     ])
     
-    await ipfs.files.write(
+    /* await ipfs.files.write(
       ipfspath,
       content,
       {create: true, parents: true}
-    );
+    ); */
+    fs.writeFileSync(ipfspath, content);
 
     console.log('ENCRYPTION --------')
     console.log('key:', key, 'iv:', iv, 'ekey:', ekey.length)
@@ -56,12 +60,17 @@ async function toArray(asyncIterator) {
 
 async function downloadFileEncrypted(ipfspath) {
   try {
-    let file_data = await ipfs.files.read(ipfspath)
-    
-    let edata = []
-    for await (const chunk of file_data)
-      edata.push(chunk)
-    edata = Buffer.concat(edata)
+    /* let file_data = await ipfs.files.read(ipfspath); */
+    let file_data = await readFile(ipfspath);
+
+    let edata = [];
+
+    console.log(file_data);
+
+    for await (const chunk of file_data) {
+      edata.push(Buffer.from([chunk]));
+    }    
+    edata = Buffer.concat(edata);
 
     const key = decryptRSA(edata.slice(0, 684).toString('utf8'))
     const iv = edata.slice(684, 700).toString('utf8')
@@ -83,18 +92,29 @@ async function downloadFileEncrypted(ipfspath) {
   }
 }
 
-async function getUploadedFiles(ipfspath='/encrypted/') {
+async function getUploadedFiles(ipfspath='encrypted/data/') {
   let files = []
-  const arr = await toArray(ipfs.files.ls(ipfspath))
+  //const arr = await toArray(ipfs.files.ls(ipfspath))
+  let arr = [];
+
+  try {
+    arr = await readdir(ipfspath, {});
+    // Do something with arr here
+  } catch (err) {
+    console.error('Error reading directory:', err);
+  }
+
+  console.log(arr);
+
   for (let file of arr) {
     if (file.type === 'directory') {
       const inner = await getUploadedFiles(ipfspath + file.name + '/')
       files = files.concat(inner)
     } else {
       files.push({
-        path: ipfspath + file.name,
-        size: file.size,
-        cid: file.cid.toString()
+        path: ipfspath + file,
+        size: (await statAsync(file)).size,
+        //cid: file.cid.toString() ?? "n/a"
       })
     }
   }
@@ -161,7 +181,7 @@ function decryptRSA(toDecrypt, privkeyPath='private.pem') {
 
 async function _testing() {
   const file = 'package.json'  // file to upload
-  const ipfspath = '/encrypted/data/' + file // ipfspath
+  const ipfspath = 'encrypted/data/' + file // ipfspath
   
   // upload to ipfs path
   await uploadFileEncrypted(file, ipfspath)
@@ -186,6 +206,7 @@ async function _testing() {
 
 const rest_port = 3000;
 const express = require("express");
+const { readFile } = require('fs/promises');
 const app = express();
 
 app.get('/', (req, res) => {
@@ -203,8 +224,8 @@ app.get("/api/files", async (req, res, next) => {
 
 app.get(/^\/api\/file(\/.*)$/, async (req, res, next) => {
   try {
-    const ipfspath = req.params[0];
-    const content = await downloadFileEncrypted(ipfspath)
+    const ipfspath = req.params[0].slice(1);
+    const content = await downloadFileEncrypted(ipfspath);
     res.send(content)
   } catch (err) {
     res.send('error: ' + err)
