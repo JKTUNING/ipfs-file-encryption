@@ -9,13 +9,15 @@ const crypto = require('crypto');
 const util = require('util');
 const readdir = util.promisify(fs.readdir);
 const statAsync = util.promisify(fs.stat);
+const rename = util.promisify(fs.rename);
+const unlinkFile = util.promisify(fs.unlink);
 
 ////////////////////////////////
 //////////// IPFS //////////////
 ////////////////////////////////
 
 generateKeys()
-_testing()
+//_testing()
 
 
 async function uploadFileEncrypted(file, ipfspath) {
@@ -44,6 +46,8 @@ async function uploadFileEncrypted(file, ipfspath) {
     console.log('contents:', buff.length, 'encrypted:', ebuff.length)
     console.log(' ')
 
+    return content
+    
   } catch (err) {
     console.log(err)
     throw err;
@@ -113,7 +117,7 @@ async function getUploadedFiles(ipfspath='encrypted/data/') {
     } else {
       files.push({
         path: ipfspath + file,
-        size: (await statAsync(file)).size,
+        size: (await statAsync(ipfspath + file)).size,
         //cid: file.cid.toString() ?? "n/a"
       })
     }
@@ -126,6 +130,13 @@ function encryptAES(buffer, secretKey, iv) {
   const data = cipher.update(buffer);
   const encrypted = Buffer.concat([data, cipher.final()]);
   return encrypted.toString('hex')
+}
+
+async function encryptFileAES(filePath, secretKey, iv, ipfspath) {
+  const inputStream = fs.createReadStream(filePath);
+  const outputStream = fs.createWriteStream(ipfspath);
+  const cipher = crypto.createCipheriv('aes-256-ctr', secretKey, iv);
+  inputStream.pipe(cipher).pipe(outputStream);
 }
 
 function decryptAES(buffer, secretKey, iv) {
@@ -208,6 +219,7 @@ const rest_port = 3000;
 const express = require("express");
 const { readFile } = require('fs/promises');
 const app = express();
+const formidable = require('formidable');
 
 app.get('/', (req, res) => {
   res.sendFile(__dirname + '/index.html');
@@ -230,6 +242,44 @@ app.get(/^\/api\/file(\/.*)$/, async (req, res, next) => {
   } catch (err) {
     res.send('error: ' + err)
   }
+});
+
+app.post('/api/file/upload', (req, res) => {
+  const form = new formidable.IncomingForm();
+
+  form.parse(req, async (err, fields, files) => {
+    if (err) {
+      return res.status(500).json({ error: 'Error parsing the form data.' });
+    }
+
+    const uploadedFiles = files.file; // 'file' corresponds to the name attribute of the file input field
+    let encryptedFiles = [];
+
+    for (let index = 0; index < uploadedFiles.length; index++) {
+      const uploadedFile = uploadedFiles[index];
+      if (!uploadedFile) {
+        return res.status(400).json({ error: 'No file uploaded.' });
+      }
+  
+      // Do something with the file (e.g., save it, process it, etc.)
+      // For example, move the file to a desired location
+      const newFilePath = __dirname + '/uploads/' + uploadedFile.originalFilename;
+  
+      console.log(uploadedFile.filepath);
+      console.log(newFilePath);
+      
+      try {
+        await rename(uploadedFile.filepath, newFilePath);
+        const newContent = await uploadFileEncrypted(`uploads/${uploadedFile.originalFilename}`, `encrypted/data/${uploadedFile.originalFilename}`);
+        encryptedFiles.push({filename: uploadedFile.originalFilename, content: newContent });
+        await unlinkFile(newFilePath);
+      } catch (error) {
+        console.log(error);
+      }
+    }
+
+    res.status(200).json(encryptedFiles);    
+  });
 });
 
 app.listen(rest_port, () => {
