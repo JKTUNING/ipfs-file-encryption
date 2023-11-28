@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const util = require('util');
+const axios = require('axios');
 const readdir = util.promisify(fs.readdir);
 const statAsync = util.promisify(fs.stat);
 const rename = util.promisify(fs.rename);
@@ -18,6 +19,39 @@ const unlinkFile = util.promisify(fs.unlink);
 
 generateKeys()
 //_testing()
+
+// this should work without streaming
+// pulls current ipfs files stored on flux and encrypts them
+// saves the encrypted file to encrypted/data/<hash>
+encryptFileIPFS("QmNVKKALYCsseoaQaQe5XyDZxubypfaK3JFG2K2DoSWJLu");
+encryptFileIPFS("QmZsM5XPUq5mBrxQopWD7pUX6ythmb5Q9XREpCeGBUcWn3");
+encryptFileIPFS("QmPJ7vpJKnr1msgndBvq5QM9LDvT85r9xxv4VXNLdf9KMB");
+
+async function encryptFileIPFS(hash) {
+  try {
+    const ipfs_request = await axios.get(`https://jetpack2_38080.app.runonflux.io/ipfs/${hash}`,
+    { 
+      responseType: 'arraybuffer',
+    });
+
+    const buff = await ipfs_request.data;
+
+    const key = crypto.randomBytes(16).toString('hex'); // 16 bytes -> 32 chars
+    const iv = crypto.randomBytes(8).toString('hex');   // 8 bytes -> 16 chars
+    const ekey = encryptRSA(key); // 32 chars -> 684 chars
+    const ebuff = encryptAES(buff, key, iv);
+
+    const content = Buffer.concat([ // headers: encrypted key and IV (len: 700=684+16)
+      Buffer.from(ekey, 'utf8'),   // char length: 684
+      Buffer.from(iv, 'utf8'),     // char length: 16
+      Buffer.from(ebuff, 'utf8')
+    ])
+    
+    fs.writeFileSync(`encrypted/data/${hash}`, content);   
+  } catch (error) {
+    console.log(JSON.stringify(error));
+  }
+}
 
 
 async function uploadFileEncrypted(file, ipfspath) {
@@ -67,27 +101,15 @@ async function downloadFileEncrypted(ipfspath) {
     /* let file_data = await ipfs.files.read(ipfspath); */
     let file_data = await readFile(ipfspath);
 
-    let edata = [];
-
-    console.log(file_data);
-
-    for await (const chunk of file_data) {
-      edata.push(Buffer.from([chunk]));
-    }    
-    edata = Buffer.concat(edata);
-
-    const key = decryptRSA(edata.slice(0, 684).toString('utf8'))
-    const iv = edata.slice(684, 700).toString('utf8')
-    const econtent = edata.slice(700).toString('utf8')
-    const ebuf = Buffer.from(econtent, 'hex')
-    const content = decryptAES(ebuf, key, iv)
+    const key = decryptRSA(file_data.subarray(0, 684).toString('utf8'))
+    const iv = file_data.subarray(684, 700).toString('utf8')
+    const econtent = Buffer.from(file_data.subarray(700).toString('utf8'), `hex`)
+    const content = decryptAES(econtent, key, iv)
 
     console.log(' ')
     console.log('DECRYPTION --------')
     console.log('key:', key, 'iv:', iv)
     console.log('contents:', content.length, 'encrypted:', econtent.length)
-    console.log('downloaded:', edata.length)
-    
     return content
     
   } catch (err) {
@@ -117,7 +139,7 @@ async function getUploadedFiles(ipfspath='encrypted/data/') {
     } else {
       files.push({
         path: ipfspath + file,
-        size: (await statAsync(ipfspath + file)).size,
+        size: `${(await statAsync(ipfspath + file)).size} bytes`,
         //cid: file.cid.toString() ?? "n/a"
       })
     }
@@ -236,9 +258,8 @@ app.get("/api/files", async (req, res, next) => {
 
 app.get(/^\/api\/file(\/.*)$/, async (req, res, next) => {
   try {
-    const ipfspath = req.params[0].slice(1);
-    const content = await downloadFileEncrypted(ipfspath);
-    res.send(content)
+    const ipfspath = req.params[0].slice(1); 
+    res.send(await downloadFileEncrypted(ipfspath));
   } catch (err) {
     res.send('error: ' + err)
   }
