@@ -2,3 +2,4 @@
 node_modules
 encrypted/data/*
 encrypted_data*
+.vscode

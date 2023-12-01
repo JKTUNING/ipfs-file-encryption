@@ -1,0 +1,13 @@
+Dockerfile
+docker-compose*
+node_modules
+.editorconfig
+.eslintrc.json
+.prettierignore
+.prettierrc.json
+ipfs-commands.txt
+update-app-message.json
+private.pem
+public.pem
+.gitignore
+assets
