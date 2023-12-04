@@ -51,7 +51,7 @@ async function encryptFileIPFS(hash) {
     const content = Buffer.concat([ // headers: encrypted key and IV (len: 700=684+16)
       Buffer.from(ekey, 'utf8'),   // char length: 684
       Buffer.from(iv, 'utf8'),     // char length: 16
-      Buffer.from(ebuff, 'utf8')
+      ebuff // raw buffer
     ])
     
     fs.writeFileSync(`encrypted/data/${hash}`, content);   
@@ -77,7 +77,7 @@ async function uploadFileEncrypted(file, ipfspath) {
     const content = Buffer.concat([ // headers: encrypted key and IV (len: 700=684+16)
       Buffer.from(ekey, 'utf8'),   // char length: 684
       Buffer.from(iv, 'utf8'),     // char length: 16
-      Buffer.from(ebuff, 'utf8')
+      ebuff // raw buffer
     ])
     
     /* await ipfs.files.write(
@@ -212,16 +212,16 @@ async function getUploadedFiles(ipfspath='encrypted/data/') {
 
 /**
  * 
- * @param {buffer} buffer - data to encrypt
- * @param {buffer} secretKey - encryption key
- * @param {buffer} iv - initilization vector
- * @returns hex encoded string
+ * @param {Buffer} buffer - data to encrypt
+ * @param {Buffer} secretKey - encryption key
+ * @param {Buffer} iv - initilization vector
+ * @returns Buffer raw
  */
 function encryptAES(buffer, secretKey, iv) {
   const cipher = crypto.createCipheriv('aes-256-ctr', secretKey, iv);
   const data = cipher.update(buffer);
   const encrypted = Buffer.concat([data, cipher.final()]);
-  return encrypted.toString('hex')
+  return encrypted; // raw buffer
 }
 
 /**
@@ -234,21 +234,29 @@ function encryptAES(buffer, secretKey, iv) {
  */
 async function decryptFileAES(filePath, secretKey, iv, res) {
   try {
-    const hexEncode = new Transform({
+    /* const hexEncode = new Transform({
       transform(chunk, encoding, callback) {
         callback(null, Buffer.from(chunk.toString(), 'hex'));
       },
-    });
+    }); */
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', 'attachment; filename=decrypted_file');
     const inputStream = fs.createReadStream(filePath, { start: 700 });
     const decipher = crypto.createDecipheriv('aes-256-ctr', secretKey, iv);
-    inputStream.pipe(hexEncode).pipe(decipher).pipe(res);    
+    //inputStream.pipe(hexEncode).pipe(decipher).pipe(res);
+    inputStream.pipe(decipher).pipe(res); // decrypt and stream raw buffer
   } catch (error) {
     return res.status(500).json({ message: "error proessing decryption" });
   }
 }
 
+/**
+ * 
+ * @param {Buffer} buffer - Data to decrypt 
+ * @param {Buffer} secretKey - key used for decryption
+ * @param {Buffer} iv - initialization vector used for decryption
+ * @returns Buffer
+ */
 function decryptAES(buffer, secretKey, iv) {
   const decipher = crypto.createDecipheriv('aes-256-ctr', secretKey, iv);
   const data = decipher.update(buffer)
@@ -278,6 +286,12 @@ function generateKeys() {
   fs.writeFileSync('public.pem', publicKey)
 }
 
+/**
+ * 
+ * @param {Buffer} toEncrypt - buffer to encrypt 
+ * @param {String} pubkeyPath - path to public key
+ * @returns base64 encoded string
+ */
 function encryptRSA(toEncrypt, pubkeyPath='public.pem') {
   const absolutePath = path.resolve(pubkeyPath)
   const publicKey = fs.readFileSync(absolutePath, 'utf8')
@@ -286,6 +300,12 @@ function encryptRSA(toEncrypt, pubkeyPath='public.pem') {
   return encrypted.toString('base64')
 }
 
+/**
+ * 
+ * @param {*} toDecrypt - buffer to decrypt
+ * @param {String} privkeyPath - private key
+ * @returns utf8 encoded string
+ */
 function decryptRSA(toDecrypt, privkeyPath='private.pem') {
   const absolutePath = path.resolve(privkeyPath)
   const privateKey = fs.readFileSync(absolutePath, 'utf8')
